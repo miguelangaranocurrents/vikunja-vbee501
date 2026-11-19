@@ -610,6 +610,22 @@ function onEnter(event: KeyboardEvent) {
 }
 
 async function doCmd() {
+	// A command selected by the user always wins: its input is what the user
+	// typed after picking it, so the single-result shortcut below must not
+	// fire on an unrelated result (e.g. a project named like the task).
+	if (selectedCmd.value !== null) {
+		if (query.value === '') {
+			openTaskAfterCreate = false
+			return
+		}
+
+		if (!isQuickAddMode) {
+			closeQuickActions()
+		}
+		await selectedCmd.value.action()
+		return
+	}
+
 	if (results.value.length === 1 && results.value[0].items.length === 1) {
 		const result = results.value[0]
 		doAction(result.type, result.items[0])
@@ -617,15 +633,7 @@ async function doCmd() {
 		return
 	}
 
-	if (selectedCmd.value === null || query.value === '') {
-		openTaskAfterCreate = false
-		return
-	}
-
-	if (!isQuickAddMode) {
-		closeQuickActions()
-	}
-	await selectedCmd.value.action()
+	openTaskAfterCreate = false
 }
 
 async function newTask() {

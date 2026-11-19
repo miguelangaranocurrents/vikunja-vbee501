@@ -20,6 +20,7 @@
 		<template #default>
 			<div class="kanban-view">
 				<div
+					ref="kanbanBoard"
 					:class="{ 'is-loading': showInitialLoading, 'is-dragging': drag || dragBucket }"
 					class="kanban kanban-bucket-container loader-container"
 				>
@@ -301,7 +302,7 @@ import {
 	useUpdateBucketMutation,
 	useLoadBucketPageMutation,
 } from '@/client/queries/kanbanMutations'
-import {computed, nextTick, ref, watch, toRef} from 'vue'
+import {computed, nextTick, ref, watch, toRef, onBeforeUnmount} from 'vue'
 import {useQuery, useQueryClient} from '@tanstack/vue-query'
 import {useRouter} from 'vue-router'
 import {useRouteQuery} from '@vueuse/router'
@@ -354,6 +355,11 @@ const DRAG_OPTIONS = {
 	dragClass: 'task-dragging',
 	delayOnTouchOnly: true,
 	delay: 1000,
+	// Edge of the board from which auto-scrolling starts while dragging. The
+	// default 30px strip sits inside the bucket the drag begins in, so the
+	// board itself would never scroll along.
+	scroll: true,
+	scrollSensitivity: 60,
 } as const
 
 const MIN_SCROLL_HEIGHT_PERCENT = 0.25
@@ -565,6 +571,7 @@ async function updateTaskPosition(e: SortableEvent & {originalEvent?: MouseEvent
 	const project = projectId.value
 	const view = props.viewId
 	drag.value = false
+	stopEdgeScroll()
 	try {
 		const {moved} = await handleTaskDropToProject(e, task => {
 			// A moved task stays in a pseudo-project board (favorites, saved filters) until the board is re-read.
@@ -793,6 +800,57 @@ function dragstart(bucket: BucketResponse) {
 	sourceBucket.value = bucket.id
 }
 
+// Sortable scrolls the scroll parent closest to the dragged item, which is the
+// bucket's task list. The board only follows along when the pointer sits within
+// sortable's edge zone, so the board is scrolled here for as long as a task
+// drag is held against one of its edges. Buckets further out then stay
+// reachable without letting go of the card first.
+const EDGE_SCROLL_ZONE = 60
+const EDGE_SCROLL_SPEED = 20
+const kanbanBoard = ref<HTMLElement | null>(null)
+let edgeScrollFrame: number | null = null
+let edgePointerX: number | null = null
+
+function trackEdgePointer(event: PointerEvent) {
+	edgePointerX = event.clientX
+}
+
+function scrollBoardTowardEdge() {
+	edgeScrollFrame = requestAnimationFrame(scrollBoardTowardEdge)
+
+	const board = kanbanBoard.value
+	if (board === null || edgePointerX === null) {
+		return
+	}
+
+	const rect = board.getBoundingClientRect()
+	if (edgePointerX >= rect.right - EDGE_SCROLL_ZONE) {
+		board.scrollLeft += EDGE_SCROLL_SPEED
+	} else if (edgePointerX <= rect.left + EDGE_SCROLL_ZONE) {
+		board.scrollLeft -= EDGE_SCROLL_SPEED
+	}
+}
+
+function startEdgeScroll() {
+	if (edgeScrollFrame !== null) {
+		return
+	}
+	edgePointerX = null
+	document.addEventListener('pointermove', trackEdgePointer, true)
+	edgeScrollFrame = requestAnimationFrame(scrollBoardTowardEdge)
+}
+
+function stopEdgeScroll() {
+	document.removeEventListener('pointermove', trackEdgePointer, true)
+	if (edgeScrollFrame !== null) {
+		cancelAnimationFrame(edgeScrollFrame)
+		edgeScrollFrame = null
+	}
+	edgePointerX = null
+}
+
+onBeforeUnmount(stopEdgeScroll)
+
 function handleTaskDragStart(e: SortableEvent) {
 	const taskId = Number(e.item.dataset.taskId)
 	const bucketIndex = Number(e.from.dataset.bucketIndex)
@@ -804,6 +862,7 @@ function handleTaskDragStart(e: SortableEvent) {
 		setDraggedTask(task)
 	}
 	dragstart(bucket)
+	startEdgeScroll()
 }
 
 function toggleDefaultBucket(bucket: BucketResponse) {

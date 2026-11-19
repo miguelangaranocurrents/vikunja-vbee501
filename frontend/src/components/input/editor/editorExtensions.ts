@@ -3,7 +3,7 @@ import {nextTick, toValue, type MaybeRefOrGetter, type Ref} from 'vue'
 import StarterKit from '@tiptap/starter-kit'
 import {createNodeFromContent, Extension, mergeAttributes, type Editor, type Extensions} from '@tiptap/core'
 import {Plugin, PluginKey} from '@tiptap/pm/state'
-import {Fragment} from '@tiptap/pm/model'
+import {Fragment, Slice} from '@tiptap/pm/model'
 import {marked} from 'marked'
 
 import Link from '@tiptap/extension-link'
@@ -25,6 +25,7 @@ import {BlockquoteWithCommentId} from './blockquoteWithCommentId'
 import {TaskLink, LINK_HTML_ATTRIBUTES} from './taskLink'
 import {createClipboardParser, fillRequiredContent, repairSliceContent} from './contentRepair'
 import {htmlHasFormatting} from './clipboardHtml'
+import {sliceToPlainText} from './clipboardText'
 
 import Commands from './commands'
 import suggestionSetup from './suggestion'
@@ -285,6 +286,24 @@ export function createEditorExtensions(deps: EditorExtensionDeps): Extensions {
 		},
 	})
 
+	// ProseMirror's default text/plain copy strips list markers, so a copied
+	// bullet list would paste back as loose lines. Hand the clipboard our own
+	// markdown-ish serialization instead.
+	const CopyAsText = Extension.create({
+		name: 'copyAsText',
+
+		addProseMirrorPlugins() {
+			return [
+				new Plugin({
+					key: new PluginKey('copyAsText'),
+					props: {
+						clipboardTextSerializer: (slice: Slice) => sliceToPlainText(slice),
+					},
+				}),
+			]
+		},
+	})
+
 	return [
 		// Starterkit:
 		StarterKit.configure({
@@ -405,5 +424,7 @@ export function createEditorExtensions(deps: EditorExtensionDeps): Extensions {
 		EmojiExtension,
 
 		PasteHandler,
+
+		CopyAsText,
 	]
 }
